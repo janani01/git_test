@@ -1,0 +1,223 @@
+pipeline {
+
+   agent none
+    options { skipDefaultCheckout()
+             skipStagesAfterUnstable()
+   }
+         parameters
+         {
+choice(choices: 'NO\nYES', description: 'Build', name: 'Build')
+choice(choices: 'NO\nYES', description: 'Deploy', name: 'Deploy')
+        #choice(name: 'Environment', choices: 'QA\nUAT', description: 'Pass the environment')
+        string(name: 'branch', defaultValue: 'master', description: 'Enter Branch Name')
+        string(name: 'Deploy_Server', defaultValue: '0.0.0.0', description: 'Please enter the deployment Server details')
+        string(name: 'EMAIL_LIST', defaultValue: '',description: 'Please enter the email list details')
+}
+        environment {
+   
+        STASH_URL ='git@gitlab.verizon.com:VVOV_SSPOrdering/asyncupdateservice.git'
+        GIT_CredentialsId='29418eca-7d2c-43e1-b66e-6965f809ceed'
+       
+        Fortify_GIT_PROJECT='CMB.VVOV.asyncupdateservice.Fortify-A.Build'
+            }
+       
+   stages {
+     
+ 
+ stage('Initialize') {
+      when {
+                expression {  params.Build == 'YES' }
+            }
+
+agent{
+docker{
+               image 'oneartifactory.verizon.com:8090/vcm/vvov/jdk/jdk17mvn:cmbcm01'
+  label 'CMB_D53'
+  }
+               }
+steps {
+            checkout changelog: false, poll: false, scm: [$class: 'GitSCM', branches: [[name: '$branch']], doGenerateSubmoduleConfigurations: false, extensions: [], gitTool: 'Default', submoduleCfg: [], userRemoteConfigs: [[credentialsId: '29418eca-7d2c-43e1-b66e-6965f809ceed', url: 'git@gitlab.verizon.com:VVOV_SSPOrdering/asyncupdateservice.git']]]
+            sh 'mvn -s /root/.m2/settings.xml -X clean install'
+sh '''
+                  echo ${ipaddress}
+ mkdir -p target/files
+ cp -p asyncupdateear/target/SSP_OS_AsyncUpdateService_itw_103.ear target/files/SSP_OS_AsyncUpdateService_itw_103.ear
+                  cp -p asyncupdate.client/target/SSP_OS_AsyncUpdateService_Client.jar target/files/SSP_OS_AsyncUpdateService_Client.jar
+'''
+script {
+          def SERVER_ID = "1823203773@1440422770951"
+          def server = Artifactory.server "${SERVER_ID}"
+          def uploadSpec = """{
+            "files": [
+              {
+                "pattern": "target/files//*.*",
+                "target": "VVO_SSPOrdering/"
+              }
+            ]
+          }"""
+          echo uploadSpec
+          server.upload(uploadSpec)
+ }
+          stash name: "first-stash", includes: "target/files/*"
+          hygieiaBuildPublishStep buildStatus: 'Success'
+      deleteDir()
+      }
+}
+     
+stage ('SonarScan') {
+    when {
+                expression {  params.Sonar == 'YES' }
+            }
+agent{
+docker{
+               image 'oneartifactory.verizon.com:8090/vcm/vvov/cm/cmbcmsonarjdk:1.8'
+  label 'CMB_D53'
+  args  '-v /cm/cmrepo/sonar:/root/.sonar'
+  }
+               }
+       
+      steps {
+                checkout changelog: false, poll: false, scm: [$class: 'GitSCM', branches: [[name: '$branch']], doGenerateSubmoduleConfigurations: false, extensions: [], gitTool: 'Default', submoduleCfg: [], userRemoteConfigs: [[credentialsId: '29418eca-7d2c-43e1-b66e-6965f809ceed', url: 'git@gitlab.verizon.com:VVOV_SSPOrdering/asyncupdateservice.git' ]]]  
+    sh '''
+          export SONAR_URL=http:\\\\onesonar.verizon.com
+          sonar-runner -Dsonar.projectKey=VVOV.SSP-asyncupdateservice \
+           -Dsonar.sources=. \
+           -Dsonar.projectVersion=FEB17 \
+           -Dsonar.projectName=VVOV.SSP_asyncupdateservice \
+  -Dsonar.projectBaseDir=. \
+  -Dsonar.language=java \
+  -Dsonar.gendarme.mode=skip \
+  -Dsonar.gallio.mode=skip \
+  -Dsonar.fxcop.mode=skip \
+  -Dsonar.stylecop.mode=skip \
+           -Dsonar.host.url=http://onesonar.verizon.com/ \
+           -Dsonar.login=2b9cca789ddff1ba0841983462cf1ba2ca476807
+    '''    
+    deleteDir()
+       }
+}
+   
+    stage('Fortify') {
+    when {
+                expression {  params.Fortify == 'YES' }
+            }
+agent{
+docker{
+               label 'CMB_D53'
+               image 'oneartifactory.verizon.com:8090/vcm/vvov/cm/cmbcmfortify:17.20'
+  }
+               }
+               
+
+steps {
+                 //git branch: '${BRANCH_NAME}', credentialsId: '29418eca-7d2c-43e1-b66e-6965f809ceed', url: 'git@gitlab.verizon.com:VVOV_SSPOrdering/asyncupdateservice.git'  
+                               
+                       
+script{
+
+checkout changelog: false, poll: false, scm: [$class: 'GitSCM', branches: [[name: '$branch']], doGenerateSubmoduleConfigurations: false, extensions: [], gitTool: 'Default', submoduleCfg: [], userRemoteConfigs: [
+[credentialsId: "${env.GIT_CredentialsId}", url: "${env.STASH_URL}" ]]]  
+
+
+sh '''
+echo FOLDER_NAME=$(basename $(dirname $JOB_NAME))
+cd $WORKSPACE/$FOLDER_NAME
+echo J_NAME=$WORKSPACE/$FOLDER_NAME
+export PROJ=CMB_SSPOS_asyncupdateservice
+export FORTITY_VERSION=RVL
+export ftimestamp=$(date +"%Y%m%d%H%M%S")
+export FBUILD_ID=$PROJ#"$FORTITY_VERSION"_$ftimestamp
+echo $FBUILD_ID > $WORKSPACE/$FOLDER_NAME/sessionId.txt
+export FBUILDID=$PROJ#"$FORTITY_VERSION"
+export FBUILDID=$PROJ#"$FORTITY_VERSION"
+export FBUILD_MBS=$FBUILDID#vzt.mbs
+export FBUILD_xml=$FBUILDID#vzt.xml
+export FBUILD_HOME=$WORKSPACE/$FOLDER_NAME
+echo $EMAIL_LIST >> email.xml
+sed 's/^/"/g; s/\\,/\\"\\,\\ \\"/g; s/$/\\"/g' email.xml > $FBUILD_xml
+cat $FBUILD_xml
+
+sourceanalyzer -b $FBUILD_ID -clean -autoheap -Xss24M -64 -Xmx512M
+sourceanalyzer -b $FBUILD_ID -autoheap -cp "**/*.jar" "**/*.java" "**/*.jsp" "**/*.xml" -exclude "build.xml" -Xss24M -64 -Xmx512M
+sourceanalyzer -b $FBUILD_ID -autoheap -make-mobile -Xss24M -64 -Xmx512M
+sourceanalyzer -b $FBUILD_ID -autoheap -export-build-session $FBUILD_HOME/$FBUILD_MBS -Xss24M -64 -Xmx512M
+
+cat <<EOF >sscupload.xml
+<project name="SSCUpload" default="scp">
+    <taskdef resource="net/sf/antcontrib/antlib.xml"/>
+    <taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+    <target name="scp">
+<for param="file">
+<path>
+<fileset dir="." includes="**/${TFS_PROJ}*.mbs"/>
+</path>
+<sequential>
+<if>
+<not>
+<isset property ="mbspath"/>
+</not>
+<then>
+<propertyregex property="mbspath" input="@{file}" regexp="(.*)\\/.*" select="\\1"/>
+<!-- <delete quiet="true">
+<fileset dir="\${mbspath}" includes="\${TFS_PROJ}*.xml"/>
+</delete>  -->
+</then>
+</if>
+<propertyregex property="xmlfile" input="@{file}" regexp="(.*)\\..*" select="\\1.xml" override="true"/>
+<!-- <echo message="&quot;oneCM@one.verizon.com&quot;, &quot;sudheer.k.kuchana@one.verizon.com&quot;, &quot;henry.vonglahn@verizonwireless.com&quot;" file="\${xmlfile}"/>  -->
+<echo message="${EMAIL_LIST}"/>
+<echo message="\${xmlfile}"/>
+               
+</sequential>
+</for>
+<scp todir="ITCENT\\Svc-ITCODESCAN:XferF1les!@itcodescan05.ebiz.verizon.com:./" trust="true" sftp="false" failonerror="false">
+<fileset dir="\${mbspath}" includes="\${TFS_PROJ}*.mbs,\${TFS_PROJ}*.xml"/>
+</scp>
+        <delete quiet="true">
+            <fileset dir="\${mbspath}" includes="\${TFS_PROJ}*.xml"/>
+        </delete>
+    </target>
+</project>
+EOF
+
+
+ant -buildfile sscupload.xml -DTFS_PROJ=$PROJ -v
+
+'''
+    def J_NAME=WORKSPACE
+println J_NAME
+   
+    step([$class: 'GitMapPkgBuilder', branchOrDate: 'date', date: '2016-01-01', enableDebug: false, outputDir:J_NAME, repoName: 'CMB_SSPOS_asyncupdateservice', repoURL:J_NAME, resolveMailMap: true])
+deleteDir()
+   
+}
+
+}
+               
+               
+ }
+    stage ('DIT-Deploy') {
+    when {
+                expression {  params.Deploy == 'YES' }
+            }
+          agent any
+     
+      steps {
+     
+      script {
+     
+      vzAnsiblePlusPlaybookExtendedPipeline env: 'AWS', os: 'Linux', parameter: '', password: '', playbook: 'deploy_AsyncUpdateService2.0.yml', servers: "$Deploy_Server", stashBranch: '', stashUrl: 'git@gitlab.verizon.com:CELV_CM_AnsibleScript/ordering-ssp.git', username: 'svc-aws_cicd_np'
+     
+       }
+     
+        unstash "first-stash"
+      hygieiaDeployPublishStep applicationName: 'AsyncUpdateService', artifactDirectory: '/target/files/', artifactGroup: 'VVO_SSPOrdering', artifactName: '*', artifactVersion: '', buildStatus: 'Success', deploymentType: 'App', environmentName: 'DIT'
+         
+deleteDir()
+
+       }
+ 
+}
+   }
+   }
+
