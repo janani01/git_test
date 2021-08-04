@@ -28,15 +28,8 @@ choice(choices: 'NO\nYES', description: 'Deploy', name: 'Deploy')
       when {
                 expression {  params.Build == 'YES' }
             }
-
-agent{
-docker{
-               image 'oneartifactory.verizon.com:8090/vcm/vvov/jdk/jdk17mvn:cmbcm01'
-  label 'CMB_D53'
-  }
-               }
 steps {
-            checkout changelog: false, poll: false, scm: [$class: 'GitSCM', branches: [[name: '$branch']], doGenerateSubmoduleConfigurations: false, extensions: [], gitTool: 'Default', submoduleCfg: [], userRemoteConfigs: [[credentialsId: '29418eca-7d2c-43e1-b66e-6965f809ceed', url: 'git@gitlab.verizon.com:VVOV_SSPOrdering/asyncupdateservice.git']]]
+            checkout changelog: false, poll: false, scm: [$class: 'GitSCM', branches: [[name: '$branch']], doGenerateSubmoduleConfigurations: false, extensions: [], gitTool: 'Default', submoduleCfg: [], userRemoteConfigs: [[credentialsId: '', url: 'git@github.com:janani01/git_test.git']]]
             sh 'mvn -s /root/.m2/settings.xml -X clean install'
 sh '''
                   echo ${ipaddress}
